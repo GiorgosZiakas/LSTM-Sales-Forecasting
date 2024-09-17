@@ -271,8 +271,14 @@ def evaluate_model(model, data_loader):
     predicted_sales = np.concatenate(predictions)
     actual_sales = np.concatenate(actuals)
     
+    # Convert dates to weekly frequency
+    predicted_sales = scaler.inverse_transform(predicted_sales.reshape(-1, 1)).flatten()
+    actual_sales = scaler.inverse_transform(actual_sales.reshape(-1, 1)).flatten()
+    weekly_dates = pd.to_datetime(dates).resample('W').last()
+    
     print("Predicted Sales Shape:", predicted_sales.shape)
     print("Actual Sales Shape:", actual_sales.shape)
+    
     return predicted_sales, actual_sales    
 
 
@@ -381,13 +387,13 @@ def walk_forward_validation(data, sequence_length, model, loss_function, optimiz
         mae = mean_absolute_error(actual_sales, predicted_sales)
         mse = mean_squared_error(actual_sales, predicted_sales)
         rmse = np.sqrt(mse)
-        r2 = r2_score(actual_sales, predicted_sales)
+        
         
         # Store the scores
         mae_scores.append(mae)
         mse_scores.append(mse)
         rmse_scores.append(rmse)
-        r2_scores.append(r2)
+        
         
     
         
@@ -399,22 +405,16 @@ def walk_forward_validation(data, sequence_length, model, loss_function, optimiz
 
 def plot_sales(actual_sales, predicted_sales, dates):
     """
-    Plot the actual and predicted sales over time.
-    :param actual_sales: Array of actual sales values
-    :param predicted_sales: Array of predicted sales values
-    :param dates: Corresponding dates for the sales data
+    Plot the actual and predicted weekly sales over time.
     """
     plt.figure(figsize=(12, 6))
-    
-    plt.plot(dates, actual_sales, label='Actual Sales', color='blue', marker='o')
-    plt.plot(dates, predicted_sales, label='Predicted Sales', color='red', linestyle='--', marker='x')
+    plt.plot(dates, actual_sales, label='Actual Weekly Sales', color='blue', marker='o')
+    plt.plot(dates, predicted_sales, label='Predicted Weekly Sales', color='red', linestyle='--', marker='x')
 
-    plt.title('Actual vs Predicted Sales')
+    plt.title('Actual vs Predicted Weekly Sales')
     plt.xlabel('Date')
     plt.ylabel('Sales')
-    
     plt.xticks(rotation=45)
-    plt.gca().xaxis.set_major_locator(mtick.MaxNLocator(integer=True))  # Ensure integer tick marks
     plt.legend()
     plt.tight_layout()
     plt.show()
