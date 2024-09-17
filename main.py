@@ -402,23 +402,6 @@ def walk_forward_validation(data, sequence_length, model, loss_function, optimiz
     
     return mae_scores, mse_scores, rmse_scores, r2_scores
 
-def plot_sales(actual_sales, predicted_sales, dates):
-    """
-    Plot the actual and predicted weekly sales over time.
-    """
-    plt.figure(figsize=(12, 6))
-    plt.plot(dates, actual_sales, label='Actual Weekly Sales', color='blue', marker='o')
-    plt.plot(dates, predicted_sales, label='Predicted Weekly Sales', color='red', linestyle='--', marker='x')
-
-    plt.title('Actual vs Predicted Weekly Sales')
-    plt.xlabel('Date')
-    plt.ylabel('Sales')
-    plt.xticks(rotation=45)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-
 
 # Step 4: Main Function
 if __name__ == 'main':
@@ -448,17 +431,11 @@ if __name__ == 'main':
         model=model,
         loss_function=loss_function,
         optimizer=optimizer,
+        scaler =preprocessor.scaler,
         n_splits=2
     )
 
 
-    # Evaluate the model and get the predicted and actual sales for plotting
-    predicted_sales, actual_sales, weekly_dates = evaluate_model(
-        model, 
-        DataLoader(SalesDataset(data, sequence_length), batch_size=32, shuffle=False), 
-        dates, 
-        preprocessor.scaler  # Pass the scaler here as well
-    )
 
    #Calculate and print average performance metrics
     avg_mae = np.mean(mae_scores)
@@ -471,7 +448,3 @@ if __name__ == 'main':
     print(f"Average RMSE: {avg_rmse}")
   
     
-        # Plot the actual and predicted weekly sales
-    plot_sales(actual_sales[-len(predicted_sales):], predicted_sales, weekly_dates[-len(predicted_sales):])
-
-
