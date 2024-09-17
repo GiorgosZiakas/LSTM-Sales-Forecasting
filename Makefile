@@ -15,4 +15,4 @@ clean:
 # Target to run the main application
 .PHONY: run
 run:
-	$(VENV)/bin/python lstm(forecasting).py
+	$(VENV)/bin/python main.py
