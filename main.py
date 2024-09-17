@@ -11,6 +11,8 @@ import holidays
 from statsmodels.tsa.seasonal import STL
 import mlflow
 import mlflow.pytorch
+
+
 # Step 1: Data Preprocessing
 class SalesDataset(Dataset):
     """
@@ -248,7 +250,7 @@ def train_model(model, train_loader, loss_function, optimizer,epochs=50):
             print(f'Epoch {epoch}, Loss: {loss.item()}')
             
             
-def evaluate_model(model, data_loader):
+def evaluate_model(model, data_loader,dates, scaler):
     """
     Function to evaluate the LSTM model.
     """
@@ -279,7 +281,7 @@ def evaluate_model(model, data_loader):
     print("Predicted Sales Shape:", predicted_sales.shape)
     print("Actual Sales Shape:", actual_sales.shape)
     
-    return predicted_sales, actual_sales    
+    return predicted_sales, actual_sales, weekly_dates    
 
 
 def predict_future(model, last_sequence, prediction_months, scaler):
