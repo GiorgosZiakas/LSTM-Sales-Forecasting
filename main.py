@@ -250,7 +250,7 @@ def train_model(model, train_loader, loss_function, optimizer,epochs=50):
             print(f'Epoch {epoch}, Loss: {loss.item()}')
             
             
-def evaluate_model(model, data_loader,dates, scaler):
+def evaluate_model(model, data_loader):
     """
     Function to evaluate the LSTM model.
     """
@@ -273,15 +273,12 @@ def evaluate_model(model, data_loader,dates, scaler):
     predicted_sales = np.concatenate(predictions)
     actual_sales = np.concatenate(actuals)
     
-    # Convert dates to weekly frequency
-    predicted_sales = scaler.inverse_transform(predicted_sales.reshape(-1, 1)).flatten()
-    actual_sales = scaler.inverse_transform(actual_sales.reshape(-1, 1)).flatten()
-    weekly_dates = pd.to_datetime(dates).resample('W').last()
+    
     
     print("Predicted Sales Shape:", predicted_sales.shape)
     print("Actual Sales Shape:", actual_sales.shape)
     
-    return predicted_sales, actual_sales, weekly_dates    
+    return predicted_sales, actual_sales 
 
 
 def predict_future(model, last_sequence, prediction_months, scaler):
@@ -451,8 +448,16 @@ if __name__ == 'main':
         model=model,
         loss_function=loss_function,
         optimizer=optimizer,
-        scaler=preprocessor.scaler,
         n_splits=2
+    )
+
+
+    # Evaluate the model and get the predicted and actual sales for plotting
+    predicted_sales, actual_sales, weekly_dates = evaluate_model(
+        model, 
+        DataLoader(SalesDataset(data, sequence_length), batch_size=32, shuffle=False), 
+        dates, 
+        preprocessor.scaler  # Pass the scaler here as well
     )
 
    #Calculate and print average performance metrics
@@ -466,19 +471,7 @@ if __name__ == 'main':
     print(f"Average RMSE: {avg_rmse}")
   
     
-    
-    # Get user input for number of weeks to predict
-    #prediction_weeks = int(input("Enter the number of weeks you want to predict: "))
-    
-    # Use the last fold's predictions for plotting
-    predicted_sales, actual_sales = evaluate_model(model, DataLoader(SalesDataset(data, sequence_length), batch_size=32, shuffle=False))
-
-    # Rescale sales to original values
-    predicted_sales = preprocessor.scaler.inverse_transform(predicted_sales.reshape(-1, 1)).flatten()
-    actual_sales = preprocessor.scaler.inverse_transform(actual_sales.reshape(-1, 1)).flatten()
-
-    # Plot the actual and predicted sales
-    plot_sales(actual_sales[-len(predicted_sales):], predicted_sales, dates[-len(predicted_sales):])
-
+        # Plot the actual and predicted weekly sales
+    plot_sales(actual_sales[-len(predicted_sales):], predicted_sales, weekly_dates[-len(predicted_sales):])
 
 
