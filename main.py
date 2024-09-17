@@ -9,9 +9,6 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick 
 import holidays
 from statsmodels.tsa.seasonal import STL
-import mlflow
-import mlflow.pytorch
-# initia
 
 # Step 1: Data Preprocessing
 class SalesDataset(Dataset):
