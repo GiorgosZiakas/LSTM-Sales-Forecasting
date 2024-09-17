@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick 
 import holidays
 from statsmodels.tsa.seasonal import STL
+import mlflow
+import mlflow.pytorch
+# initia
 
 # Step 1: Data Preprocessing
 class SalesDataset(Dataset):
@@ -422,7 +425,7 @@ def plot_sales(actual_sales, predicted_sales, dates):
 
 # Step 4: Main Function
 if __name__ == 'main':
-    file_path = 'path-file'  # Path to the sales data file
+    file_path = '/Users/giorgosziakas/Desktop/D2023.csv'  # Path to the sales data file
     
     # Initialize the data preprocessor
     preprocessor = DataPreprocessor(file_path)
@@ -437,6 +440,10 @@ if __name__ == 'main':
     loss_function = nn.MSELoss()  # Mean Squared Error loss for regression
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  # Adam optimizer
 
+    
+    
+    
+        
     # Perform walk-forward validation
     mae_scores, mse_scores, rmse_scores, r2_scores = walk_forward_validation(
         data=data,
@@ -458,8 +465,7 @@ if __name__ == 'main':
     print(f"Average MSE: {avg_mse}")
     print(f"Average RMSE: {avg_rmse}")
   
-
-    # User-defined number of months for future predictions
+    
     
     # Get user input for number of weeks to predict
     #prediction_weeks = int(input("Enter the number of weeks you want to predict: "))
