@@ -210,12 +210,12 @@ class LSTMModel(nn.Module):
     
     """
     
-    def __init__(self, input_size, hidden_layer_size,  output_size, num_layers=2):
+    def __init__(self, input_size, hidden_layer_size,  output_size, num_layers=2, dropout=0.2):
         super(LSTMModel, self).__init__()
         self.hidden_layer_size = hidden_layer_size
         
         # LSTM layer with specified number of input features, hidden units, and layers
-        self.lstm = nn.LSTM(input_size, hidden_layer_size, num_layers, batch_first=True, dropout=0.2)
+        self.lstm = nn.LSTM(input_size, hidden_layer_size, num_layers, batch_first=True, dropout=dropout)
 
         # A fully connected layer to produce the output from LSTM's hidden state
         self.linear = nn.Linear(hidden_layer_size, output_size)
@@ -233,22 +233,47 @@ class LSTMModel(nn.Module):
 
 # Step 3: Training and Evaluation Functions
 
-def train_model(model, train_loader, loss_function, optimizer,epochs=50):
+def train_model(model, train_loader, vas_loader, loss_function, optimizer,epochs=50, learning_rate=0.001, hidden_layer_size=128, num_layers=0.2):
+    mlflow.set_tracking_uri("http://localhost:5000") # Set the MLflow tracking server URI
     """
     Function to train the LSTM model.
     """
-    for epoch in range(epochs):
-        model.train()  # Set the model to training mode
-        for seq, labels in train_loader:
-            seq, labels = seq.float(), labels.float()  # Convert to float tensors
-            optimizer.zero_grad()  # Clear previous gradients
-            y_pred = model(seq)  # Make predictions
-            loss = loss_function(y_pred, labels.view(-1,1))  # Calculate loss
-            loss.backward()  # Backpropagate the error
-            optimizer.step()  # Update model weights
-        if epoch % 10 == 0:  # Print loss every 10 epochs
-            print(f'Epoch {epoch}, Loss: {loss.item()}')
+    with mlfloe.start_run():
+        mlflow.log_param('learning rate', learning_rate)
+        mlflow.log_param('hidden layer size', hidden_layer_size)
+        mlflow.log_param('num layers', num_layers)
+
+        for epoch in range(epochs):
+            model.train()  # Set the model to training mode
+            for seq, labels in train_loader:
+                seq, labels = seq.float(), labels.float()  # Convert to float tensors
+                optimizer.zero_grad()  # Clear previous gradients
+                y_pred = model(seq)  # Make predictions
+                loss = loss_function(y_pred, labels.view(-1,1))  # Calculate loss
+                loss.backward()  # Backpropagate the error
+                optimizer.step()  # Update model weights
+                train_loss += loss.item() # Add the loss to the training set loss
+            val_loss = 0
+            model.eval()  # Set the model to evaluation mode
+            with torch.no_grad():
+                for seq, labels in val_loader:
+                    seq, labels = seq.float(), labels.float()
+                    y_pred = model(seq)
+                    val_loss += loss_function(y_pred, labels.view(-1,1)).item()
             
+            # Average loss for the epoch
+            avg_train_loss = train_loss / len(train_loader)
+            avg_val_loss = val_loss / len(val_loader)
+            
+            # Log metrics to mlflow
+            mlflow.log_metric('train_loss', avg_train_loss, step=epoch)
+            mlflow.log_metric('val_loss', avg_val_loss, step=epoch) 
+            
+            if epoch % 10 == 0:  # Print loss every 10 epochs
+                print(f'Epoch {epoch}, Train Loss: {avg_train_loss}, Validation Loss: {avg_val_loss}')
+
+        # Log the final model
+        mlflow.pytorch.log_model(model, "LSTM_Model")
             
 def evaluate_model(model, data_loader):
     """
