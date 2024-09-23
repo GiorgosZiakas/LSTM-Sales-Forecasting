@@ -13,6 +13,7 @@ import mlflow
 import mlflow.pytorch
 
 
+
 # Step 1: Data Preprocessing
 class SalesDataset(Dataset):
     """
@@ -46,11 +47,10 @@ class DataPreprocessor:
         self.standard_scaler = StandardScaler()  # For scaling other features
 
     def combine_datetime(self):
-        """Combine 'Date' and 'Time' columns into a single 'Datetime' column."""
-        self.data['Date'] = self.data['Date'].astype(str)
-        self.data['Time'] = self.data['Time'].astype(str)
-        self.data['Datetime'] = pd.to_datetime(self.data['Date'] + ' ' + self.data['Time'], format='%d.%m.%y %H:%M:%S')
-
+        self.data['Datetime'] = pd.to_datetime(
+        self.data['Date'] + ' ' + self.data['Time'],
+        dayfirst=True, errors='coerce')
+    
     def initialize_holidays(self):
         """Initialize the UK holidays after the Datetime column is created."""
         self.uk_holidays = holidays.UnitedKingdom(years=self.data['Datetime'].dt.year.unique())
@@ -60,7 +60,13 @@ class DataPreprocessor:
         self.data['Gross Sales'] = pd.to_numeric(
             self.data['Gross Sales'].replace('[£,]', '', regex=True), errors='coerce'
         )
-        self.data['Gross Sales'].fillna(0, inplace=True)  # Filling NaNs with 0 for now
+        
+        # Fill missing values with linear interpolation
+        self.data['Gross Sales'].interpolate(method='linear', inplace=True)
+        
+        # Drop any remaining NaN values
+        self.data.dropna(subset=['Gross Sales'], inplace=True)
+        
 
     def add_holiday_flags(self):
         """Add flags for Christmas and Easter, and flag seasonality peaks."""
@@ -114,13 +120,11 @@ class DataPreprocessor:
             'Is Easter': 'max',     # Same for Easter
             'Is Seasonality Peak': 'max'  # Peak season flag
         }).reset_index()
-
+        
+        # Forward-fill missing 'Gross Sales' values
         weekly_sales['Gross Sales'].fillna(method='ffill', inplace=True)
         #weekly_sales['Is Afternoon Peak'] = self.add_afternoon_peak()  # Add afternoon peak flag
         #weekly_sales['Is Weekend Peak'] = self.add_weekend_peak()  # Add weekend peak flag
-        print("Weekly Sales Data: First 5 rows")
-        print(weekly_sales.head()) # Debug print
-        
         return weekly_sales
     
     def add_time_features(self, df):
@@ -142,6 +146,8 @@ class DataPreprocessor:
         df['Trend'] = result.trend
         df['Seasonality'] = result.seasonal
         df['Residual'] = result.resid
+        df.dropna(inplace=True)  # Drop NaN values from the decomposition
+        df.reset_index(drop=True, inplace=True)  # Reset the index after dropping rows
         return df
 
     def create_lag_features(self, df):
@@ -155,6 +161,8 @@ class DataPreprocessor:
         
         # Drop rows with NaN due to lagging, but make sure enough data remains
         df.dropna(inplace=True)
+        
+        df.reset_index(drop=True, inplace=True)  # Reset the index after dropping rows
         
         # Check how many rows are left after dropping NaNs
         print(f"After dropping NaNs: {df.shape[0]} rows")
@@ -228,14 +236,52 @@ class LSTMModel(nn.Module):
         predictions = self.linear(lstm_out[:, -1])
         return predictions
         
-        
+# Create a class for early stopping
+class EarlyStopping:
+    """
+    Early stopping to stop training when validation loss doesn't improve.
+    """
+
+    def __init__(self, patience=10, min_delta=0.0001):
+        """
+        :param patience: Number of epochs to wait before stopping.
+        :param min_delta: Minimum change in loss to qualify as improvement.
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.best_loss = None
+
+    def __call__(self, val_loss):
+        if self.best_loss is None or val_loss < self.best_loss - self.min_delta:
+            self.best_loss = val_loss
+            self.counter = 0
+            return False  # Continue training
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True  # Stop training
+            return False  # Continue training       
 
 
 # Step 3: Training and Evaluation Functions
-def train_model(model, train_loader, val_loader, loss_function, optimizer, epochs=50):
+def train_model(model, train_loader, val_loader, loss_function, optimizer, epochs=100, early_stopping=None):
     """
-    Function to train the LSTM model.
+    Trains the LSTM model.
+
+    :param model: The LSTM model to train.
+    :param train_loader: DataLoader for training data.
+    :param val_loader: DataLoader for validation data.
+    :param loss_function: The loss function to optimize.
+    :param optimizer: The optimizer for training.
+    :param epochs: Number of training epochs.
+    :param early_stopping: EarlyStopping object to prevent overfitting.
+    :return: Lists of training and validation losses per epoch.
     """
+    
+    train_losses = []
+    val_losses = []
+    
     for epoch in range(epochs):
         model.train()  # Set the model to training mode
         
@@ -250,6 +296,10 @@ def train_model(model, train_loader, val_loader, loss_function, optimizer, epoch
             optimizer.step()  # Update model weights
             train_loss += loss.item()  # Add the loss to the training set loss
 
+        avg_train_loss = train_loss / len(train_loader)  # Average training loss for the epoch
+        train_losses.append(avg_train_loss)  # Store the loss for plotting
+
+
         val_loss = 0 # Reset validation loss for each epoch
         
         model.eval()  # Set the model to evaluation mode
@@ -259,15 +309,24 @@ def train_model(model, train_loader, val_loader, loss_function, optimizer, epoch
                 y_pred = model(seq)
                 val_loss += loss_function(y_pred, labels.view(-1,1)).item()
 
-        # Average loss for the epoch
-        avg_train_loss = train_loss / len(train_loader)
+        # Average val loss for the epoch
         avg_val_loss = val_loss / len(val_loader)
+        val_losses.append(avg_val_loss)  # Store the validation loss for plotting
+
+        # Early stopping
+        if early_stopping is not None:
+            if early_stopping(avg_val_loss):
+                print(f'Early stopping at epoch {epoch}')
+                break
+            
+        
 
         if epoch % 10 == 0:  # Print loss every 10 epochs
             print(f'Epoch {epoch}, Train Loss: {avg_train_loss}, Validation Loss: {avg_val_loss}')
 
+    return train_losses, val_losses
          
-def evaluate_model(model, data_loader):
+def evaluate_model(model, data_loader,scaler):
     """
     Function to evaluate the LSTM model.
     """
@@ -290,6 +349,17 @@ def evaluate_model(model, data_loader):
     predicted_sales = np.concatenate(predictions)
     actual_sales = np.concatenate(actuals)
     
+    # Rescale to original values
+    predicted_sales = scaler.inverse_transform(predicted_sales)
+    actual_sales = scaler.inverse_transform(actual_sales)
+
+    # Calculate metrics
+    mae = mean_absolute_error(actual_sales, predicted_sales)
+    mse = mean_squared_error(actual_sales, predicted_sales)
+    rmse = np.sqrt(mse)
+    
+
+    return mae, mse, rmse, predicted_sales, actual_sales
     
     
     print("Predicted Sales Shape:", predicted_sales.shape)
@@ -334,16 +404,25 @@ def predict_future(model, last_sequence, prediction_months, scaler):
     print(f"Future Predictions: {predictions}")
     return predictions
 
-
-def walk_forward_validation(data, sequence_length, model, loss_function, optimizer, scaler, n_splits=2, epochs=50, learning_rate=0.001, hidden_layer_size=128, num_layers=2, dropout=0.2):
+def walk_forward_validation(data, sequence_length, model_params, loss_function, scaler, n_splits=2, epochs=100):
     """
-    Perform walk-forward validation on the time series data with MLflow logging.
+    Performs walk-forward validation.
+
+    :param data: Preprocessed data as NumPy array.
+    :param sequence_length: Number of time steps in each input sequence.
+    :param model_params: Dictionary of model parameters.
+    :param loss_function: Loss function for training.
+    :param scaler: Scaler for inverse transforming.
+    :param n_splits: Number of folds for validation.
+    :param epochs: Number of epochs for training.
+    :return: Lists of performance metrics.
     """
     n_samples = len(data)
     fold_size = int(n_samples / (n_splits + 1))
 
-    # Start MLflow run outside the loop to track the entire walk-forward validation process
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
+
+    maes, mses, rmses = [], [], []
 
     for i in range(n_splits):
         print(f"Processing Fold {i + 1}")
@@ -351,61 +430,83 @@ def walk_forward_validation(data, sequence_length, model, loss_function, optimiz
         val_start = train_end
         val_end = min(val_start + fold_size, n_samples)
 
-        # Split data
         train_data = data[:train_end]
         val_data = data[val_start:val_end]
-        
-        # Create datasets for PyTorch
+
         train_dataset = SalesDataset(train_data, sequence_length)
         val_dataset = SalesDataset(val_data, sequence_length)
 
-        # Create data loaders
         train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 
-        # Start a new MLflow run for each fold
         with mlflow.start_run(nested=True):
-            # Log hyperparameters for this fold
-            mlflow.log_param("sequence_length", sequence_length)
-            mlflow.log_param("learning_rate", learning_rate)
-            mlflow.log_param("hidden_layer_size", hidden_layer_size)
-            mlflow.log_param("num_layers", num_layers)
-            mlflow.log_param("dropout", dropout)
+            # Log hyperparameters
+            for param, value in model_params.items():
+                mlflow.log_param(param, value)
             mlflow.log_param("fold", i + 1)
 
-            # Train the model for this fold
-            train_model(model, train_loader, val_loader, loss_function, optimizer, epochs=epochs)
+            # Initialize model
+            model = LSTMModel(
+                input_size=model_params['input_size'],
+                hidden_layer_size=model_params['hidden_layer_size'],
+                output_size=1,
+                num_layers=model_params['num_layers'],
+                dropout=model_params['dropout']
+            )
+            optimizer = torch.optim.Adam(model.parameters(), lr=model_params['learning_rate'])
+            early_stopping = EarlyStopping(patience=5, min_delta=0.0001)
 
-            # Evaluate the model on the validation set
-            predicted_sales, actual_sales = evaluate_model(model, val_loader)
+            # Train model
+            train_losses, val_losses = train_model(
+                model, train_loader, val_loader,
+                loss_function, optimizer, epochs=epochs,
+                early_stopping=early_stopping
+            )
 
-            # Rescale the predicted and actual sales to original values
-            predicted_sales = scaler.inverse_transform(predicted_sales.reshape(-1, 1)).flatten()
-            actual_sales = scaler.inverse_transform(actual_sales.reshape(-1, 1)).flatten()
+            # Plot loss curves
+            plt.figure(figsize=(10, 5))
+            plt.plot(train_losses, label='Training Loss')
+            plt.plot(val_losses, label='Validation Loss')
+            plt.legend()
+            plt.title('Loss Curves')
+            plt.xlabel('Epochs')
+            plt.ylabel('Loss')
+            # Log the figure to MLflow
+            mlflow.log_figure(plt.gcf(), "loss_curves.png")
+            plt.close()
+            
 
-            # Calculate accuracy metrics
-            mae = mean_absolute_error(actual_sales, predicted_sales)
-            mse = mean_squared_error(actual_sales, predicted_sales)
-            rmse = np.sqrt(mse)
+            # Evaluate model
+            mae, mse, rmse, predicted_sales, actual_sales = evaluate_model(model, val_loader, scaler)
 
-            # Log fold-specific metrics to MLflow
+            # Log metrics
             mlflow.log_metric("mae", mae)
             mlflow.log_metric("mse", mse)
             mlflow.log_metric("rmse", rmse)
+            
 
-            # Reinitialize the model for each fold
-            model = LSTMModel(input_size=model.lstm.input_size, hidden_layer_size=model.hidden_layer_size, output_size=1)
-            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+            # Log model
+            mlflow.pytorch.log_model(model, artifact_path="model")
 
-    # Log overall metrics for the run after all folds are done
-    mlflow.log_metric("avg_mae", np.mean([mae]))
-    mlflow.log_metric("avg_mse", np.mean([mse]))
-    mlflow.log_metric("avg_rmse", np.mean([rmse]))
+            # Store metrics
+            maes.append(mae)
+            mses.append(mse)
+            rmses.append(rmse)
+            
 
-    return mae, mse, rmse
+    # Log average metrics
+    mlflow.log_metric("avg_mae", np.mean(maes))
+    mlflow.log_metric("avg_mse", np.mean(mses))
+    mlflow.log_metric("avg_rmse", np.mean(rmses))
+   
+
+    return maes, mses, rmses
+
+
+
 
 # Step 4: Main Function
-if __name__ == 'main':
+if __name__ == '__main__':
     file_path = '/Users/giorgosziakas/Desktop/D2023.csv'  # Path to the sales data file
     
     # Initialize the data preprocessor
@@ -417,38 +518,31 @@ if __name__ == 'main':
 
     # Initialize the LSTM model, loss function, and optimizer
     input_size = data.shape[1] - 1  # Number of input features (excluding the target)
-    model = LSTMModel(input_size=input_size, hidden_layer_size=128, output_size=1, num_layers=2)
-    loss_function = nn.MSELoss()  # Mean Squared Error loss for regression
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  # Adam optimizer
-
+    
+    model_params = {
+        'input_size': input_size,
+        'hidden_layer_size': 264,
+        'num_layers': 2,
+        'dropout': 0.2,
+        'learning_rate': 0.01
+    }
+    
+    loss_function = nn.MSELoss()  # Mean Squared Error loss
        
         
     # Perform walk-forward validation
-    mae_scores, mse_scores, rmse_scores = walk_forward_validation(
+    maes, mses, rmses = walk_forward_validation(
         data=data,
         sequence_length=sequence_length,
-        model=model,
+        model_params=model_params,
         loss_function=loss_function,
-        optimizer=optimizer,
-        scaler =preprocessor.scaler,
-        n_splits=2
+        scaler=preprocessor.scaler,
+        n_splits=2,
+        epochs=100
     )
-
-
-
-   #Calculate and print average performance metrics
-    avg_mae = np.mean(mae_scores)
-    avg_mse = np.mean(mse_scores)
-    avg_rmse = np.mean(rmse_scores)
     
+    # Print average metrics
+    print(f"Average MAE: {np.mean(maes)}")
+    print(f"Average MSE: {np.mean(mses)}")
+    print(f"Average RMSE: {np.mean(rmses)}")
 
-    print(f"Average MAE: {avg_mae}")
-    print(f"Average MSE: {avg_mse}")
-    print(f"Average RMSE: {avg_rmse}")
-  
-    
-    # Log average metrics to MLflow
-    mlflow.log_metric('avg_mae', avg_mae)
-    mlflow.log_metric('avg_mse', avg_mse)
-    mlflow.log_metric('avg_rmse', avg_rmse)
-    
