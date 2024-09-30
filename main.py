@@ -503,8 +503,8 @@ def walk_forward_validation(data, sequence_length, model_params, loss_function, 
     return maes, mses, rmses
 
 
-# Create a function for hyperparameter tuning
-def grid_search_hyperparameters(hyperparameter_grid, data, sequence_length, loss_function, scaler, n_splits=2, epochs= 100 ):
+
+def grid_search_hyperparameters(hyperparameter_grid, data, sequence_length, loss_function, scaler, n_splits=2, epochs=100):
     """
     Perform grid search over the hyperparameter space and train/evaluate the model.
     
@@ -522,37 +522,42 @@ def grid_search_hyperparameters(hyperparameter_grid, data, sequence_length, loss
     keys, values = zip(*hyperparameter_grid.items())
     param_combinations = [dict(zip(keys, v)) for v in product(*values)]
     
-    #Calcualte the input size
-    input_size = data.shape[1] - 1  # Number of input features (excluding the target)
+    # Calculate input_size from the preprocessed data
+    input_size = data.shape[1] - 1  # Number of features (excluding target)
     
     # Initialize best hyperparameters and metrics
     best_mae, best_params, best_rmse = float('inf'), None, float('inf')
     
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow.set_tracking_uri("http://127.0.0.1:5000")  # Ensure MLflow is properly set up
     
     for params in param_combinations:
-        print(f"Testing hyparameters: {params}")
+        print(f"Testing hyperparameters: {params}")
         
-        # Add input size to the model parameters
+        # Add input_size to the current params since it's constant
         params['input_size'] = input_size
+
+        # Ensure that the previous run is ended before starting a new one
+        if mlflow.active_run():
+            mlflow.end_run()  # Close any active run
+
+        # Start a new MLflow run
+        with mlflow.start_run(nested=True):
+            # Perform walk-forward validation
+            maes, mses, rmses = walk_forward_validation(
+                data=data,
+                sequence_length=sequence_length,
+                model_params=params,
+                loss_function=loss_function,
+                scaler=scaler,
+                n_splits=n_splits,
+                epochs=epochs
+            )
         
-        # Perform walk-forward validation
-        maes, mses, rmses = walk_forward_validation(
-            data=data,
-            sequence_length=sequence_length,
-            model_params=params,
-            loss_function=loss_function,
-            scaler=scaler,
-            n_splits=n_splits,
-            epochs=epochs
-        )
+            # Calculate average MAE and RMSE
+            avg_mae = np.mean(maes)
+            avg_rmse = np.mean(rmses)
         
-        # Calculate average MAE and RMSE
-        avg_mae = np.mean(maes)
-        avg_rmse = np.mean(rmses)
-        
-        # Log metrics to MLflow
-        with mlflow.start_run():
+            # Log metrics to MLflow
             mlflow.log_params(params)
             mlflow.log_metric("avg_mae", avg_mae)
             mlflow.log_metric("avg_rmse", avg_rmse)
@@ -563,15 +568,19 @@ def grid_search_hyperparameters(hyperparameter_grid, data, sequence_length, loss
                 best_params = params
                 best_rmse = avg_rmse
                 print(f"New best parameters: {params} with MAE: {best_mae} and RMSE: {best_rmse}")
+        
+        # Ensure the current run is ended after logging
+        mlflow.end_run()
 
-    # Log best parameters and metrics
-    mlflow.log_param("best_hidden_layer_size", best_params['hidden_layer_size'])
-    mlflow.log_param("best_num_layers", best_params['num_layers'])
-    mlflow.log_param("best_dropout", best_params['dropout'])
-    mlflow.log_param("best_learning_rate", best_params['learning_rate'])
-    mlflow.log_metric("best_mae", best_mae)
-    mlflow.log_metric("best_mae", best_mae)
-    mlflow.log_metric("best_rmse", best_rmse)
+    # Log best parameters and metrics in a final run
+    with mlflow.start_run():
+        mlflow.log_param("best_hidden_layer_size", best_params['hidden_layer_size'])
+        mlflow.log_param("best_num_layers", best_params['num_layers'])
+        mlflow.log_param("best_dropout", best_params['dropout'])
+        mlflow.log_param("best_learning_rate", best_params['learning_rate'])
+        mlflow.log_param("best_input_size", best_params['input_size'])
+        mlflow.log_metric("best_mae", best_mae)
+        mlflow.log_metric("best_rmse", best_rmse)
 
     return best_params, best_mae, best_rmse
     
