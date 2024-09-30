@@ -322,8 +322,9 @@ def train_model(model, train_loader, val_loader, loss_function, optimizer, epoch
         
 
         if epoch % 10 == 0:  # Print loss every 10 epochs
+    
             print(f'Epoch {epoch}, Train Loss: {avg_train_loss}, Validation Loss: {avg_val_loss}')
-
+    
     return train_losses, val_losses
          
 def evaluate_model(model, data_loader,scaler):
@@ -359,23 +360,23 @@ def evaluate_model(model, data_loader,scaler):
     rmse = np.sqrt(mse)
     
 
-    return mae, mse, rmse, predicted_sales, actual_sales
+    
     
     
     print("Predicted Sales Shape:", predicted_sales.shape)
     print("Actual Sales Shape:", actual_sales.shape)
     
-    return predicted_sales, actual_sales 
+    return mae, mse, rmse, predicted_sales, actual_sales
 
 
 def predict_future(model, last_sequence, prediction_months, scaler):
     """
-    Function to predict future values based on the last known sequence (monthly data).
+    Function to predict future values based on the last known sequence (weekly data).
     :param model: The trained LSTM model
     :param last_sequence: The last sequence of input data to start predictions from
-    :param prediction_months: Number of future periods (months) to predict
+    :param prediction_months: Number of future periods (weeks) to predict
     :param scaler: Scaler used to inverse transform the scaled values
-    :return: Array of predicted values (monthly predictions)
+    :return: Array of predicted values (weekly predictions)
     """
     model.eval()  # Set model to evaluation mode
     predictions = []
