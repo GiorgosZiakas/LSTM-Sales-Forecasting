@@ -585,14 +585,14 @@ if __name__ == '__main__':
 
 
     # Initialize the model parameters
-    model = LSTMModel(input_size=14, hidden_layer_size=256 , output_size=1, num_layers=2, dropout=0.2)
+    model = LSTMModel(input_size=14, hidden_layer_size=254 , output_size=1, num_layers=2, dropout=0.2)
     loss_function = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-    early_stopping = EarlyStopping(patience=5, min_delta=0.0001)
+    early_stopping = EarlyStopping(patience=10, min_delta=0.0001)
 
 
     # Train the model and display the loss curves
-    train_losses, val_losses = train_model(model, train_loader, val_loader, loss_function, optimizer, epochs=100,
+    train_losses, val_losses = train_model(model, train_loader, val_loader, loss_function, optimizer, epochs=300,
                                            early_stopping=early_stopping, plot_loss=True)
 
 
