@@ -11,7 +11,7 @@ import holidays
 from statsmodels.tsa.seasonal import STL
 import mlflow
 import mlflow.pytorch
-
+from itertools import product
 
 
 # Step 1: Data Preprocessing
@@ -503,6 +503,78 @@ def walk_forward_validation(data, sequence_length, model_params, loss_function, 
     return maes, mses, rmses
 
 
+# Create a function for hyperparameter tuning
+def grid_search_hyperparameters(hyperparameter_grid, data, sequence_length, loss_function, scaler, n_splits=2, epochs= 100 ):
+    """
+    Perform grid search over the hyperparameter space and train/evaluate the model.
+    
+    :param hyperparameter_grid: Dictionary with lists of hyperparameters to tune.
+    :param data: Preprocessed data as NumPy array.
+    :param sequence_length: Number of time steps in each input sequence.
+    :param loss_function: Loss function for training.
+    :param scaler: Scaler for inverse transforming.
+    :param n_splits: Number of folds for validation.
+    :param epochs: Number of epochs for training.
+    :return: Best hyperparameters and metrics.
+    """
+    
+    # Generate all combinations of hyperparameters
+    keys, values = zip(*hyperparameter_grid.items())
+    param_combinations = [dict(zip(keys, v)) for v in product(*values)]
+    
+    #Calcualte the input size
+    input_size = data.shape[1] - 1  # Number of input features (excluding the target)
+    
+    # Initialize best hyperparameters and metrics
+    best_mae, best_params, best_rmse = float('inf'), None, float('inf')
+    
+    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    
+    for params in param_combinations:
+        print(f"Testing hyparameters: {params}")
+        
+        # Add input size to the model parameters
+        params['input_size'] = input_size
+        
+        # Perform walk-forward validation
+        maes, mses, rmses = walk_forward_validation(
+            data=data,
+            sequence_length=sequence_length,
+            model_params=params,
+            loss_function=loss_function,
+            scaler=scaler,
+            n_splits=n_splits,
+            epochs=epochs
+        )
+        
+        # Calculate average MAE and RMSE
+        avg_mae = np.mean(maes)
+        avg_rmse = np.mean(rmses)
+        
+        # Log metrics to MLflow
+        with mlflow.start_run():
+            mlflow.log_params(params)
+            mlflow.log_metric("avg_mae", avg_mae)
+            mlflow.log_metric("avg_rmse", avg_rmse)
+            
+            # Log the best hyperparameters
+            if avg_mae < best_mae:
+                best_mae = avg_mae
+                best_params = params
+                best_rmse = avg_rmse
+                print(f"New best parameters: {params} with MAE: {best_mae} and RMSE: {best_rmse}")
+
+    # Log best parameters and metrics
+    mlflow.log_param("best_hidden_layer_size", best_params['hidden_layer_size'])
+    mlflow.log_param("best_num_layers", best_params['num_layers'])
+    mlflow.log_param("best_dropout", best_params['dropout'])
+    mlflow.log_param("best_learning_rate", best_params['learning_rate'])
+    mlflow.log_metric("best_mae", best_mae)
+    mlflow.log_metric("best_mae", best_mae)
+    mlflow.log_metric("best_rmse", best_rmse)
+
+    return best_params, best_mae, best_rmse
+    
 
 
 # Step 4: Main Function
@@ -516,33 +588,29 @@ if __name__ == '__main__':
     # Define sequence length for the LSTM model
     sequence_length = 12  # Number of time steps in each input sequence
 
-    # Initialize the LSTM model, loss function, and optimizer
-    input_size = data.shape[1] - 1  # Number of input features (excluding the target)
-    
-    model_params = {
-        'input_size': input_size,
-        'hidden_layer_size': 264,
-        'num_layers': 2,
-        'dropout': 0.2,
-        'learning_rate': 0.01
+    # Define hyperparameter grid for tuning
+    hyperparameter_grid = {
+        'hidden_layer_size': [64, 128, 256],
+        'num_layers': [1, 2, 3],
+        'dropout': [0.1, 0.2, 0.3],
+        'learning_rate': [0.001, 0.01, 0.1]
     }
     
     loss_function = nn.MSELoss()  # Mean Squared Error loss
-       
-        
-    # Perform walk-forward validation
-    maes, mses, rmses = walk_forward_validation(
+    
+    # Perform grid search
+    best_params, best_mae, best_rmse = grid_search_hyperparameters(
+        hyperparameter_grid=hyperparameter_grid,
         data=data,
         sequence_length=sequence_length,
-        model_params=model_params,
         loss_function=loss_function,
         scaler=preprocessor.scaler,
         n_splits=2,
         epochs=100
     )
     
-    # Print average metrics
-    print(f"Average MAE: {np.mean(maes)}")
-    print(f"Average MSE: {np.mean(mses)}")
-    print(f"Average RMSE: {np.mean(rmses)}")
+    # Print the best hyperparameters and metrics
+    print(f"Best Hyperparameters: {best_params}")
+    print(f"Best MAE: {best_mae}")
+    print(f"Best RMSE: {best_rmse}")
 
