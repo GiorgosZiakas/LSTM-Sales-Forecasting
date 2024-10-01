@@ -47,24 +47,28 @@ class DataPreprocessor:
 
     def combine_datetime(self):
         self.data['Datetime'] = pd.to_datetime(
-        self.data['Date'] + ' ' + self.data['Time'],
-        dayfirst=True, errors='coerce')
+            self.data['Date'] + ' ' + self.data['Time'],
+            format='%d.%m.%y %H:%M:%S',  # Adjusted format string
+            errors='coerce'
+        )
     
     def initialize_holidays(self):
         """Initialize the UK holidays after the Datetime column is created."""
-        self.uk_holidays = holidays.UnitedKingdom(years=self.data['Datetime'].dt.year.unique())
-
+        years = self.data['Datetime'].dt.year.unique()
+        self.uk_holidays = holidays.UnitedKingdom(years=years)
+        
     def clean_gross_sales(self):
         """Convert 'Gross Sales' to numeric and handle missing or incorrect values."""
-        self.data['Gross Sales'] = pd.to_numeric(
-            self.data['Gross Sales'].replace('[£,]', '', regex=True), errors='coerce'
-        )
+        # Remove currency symbols and commas
+        self.data['Gross Sales'] = self.data['Gross Sales'].replace('[£,]', '', regex=True)
+        # Convert to numeric
+        self.data['Gross Sales'] = pd.to_numeric(self.data['Gross Sales'], errors='coerce')
         
         # Fill missing values with linear interpolation
-        self.data['Gross Sales'].interpolate(method='linear', inplace=True)
-        
+        self.data['Gross Sales'] = self.data['Gross Sales'].interpolate(method='linear')
         # Drop any remaining NaN values
         self.data.dropna(subset=['Gross Sales'], inplace=True)
+
         
 
     def add_holiday_flags(self):
@@ -121,9 +125,8 @@ class DataPreprocessor:
         }).reset_index()
         
         # Forward-fill missing 'Gross Sales' values
-        weekly_sales['Gross Sales'].fillna(method='ffill', inplace=True)
-        #weekly_sales['Is Afternoon Peak'] = self.add_afternoon_peak()  # Add afternoon peak flag
-        #weekly_sales['Is Weekend Peak'] = self.add_weekend_peak()  # Add weekend peak flag
+        # Forward-fill missing 'Gross Sales' values if necessary
+        weekly_sales['Gross Sales'] = weekly_sales['Gross Sales'].ffill()
         return weekly_sales
     
     def add_time_features(self, df):
@@ -151,29 +154,27 @@ class DataPreprocessor:
 
     def create_lag_features(self, df):
         """Add lagged features to capture sales trends from previous weeks."""
-        df['Lag_1'] = df['Gross Sales'].shift(1)  # Last week's sales
-        df['Lag_4'] = df['Gross Sales'].shift(4)  # Sales from four weeks ago
-        df['Lag_12'] = df['Gross Sales'].shift(12)  # Sales from 12 weeks ago (quarterly lag)
+        df['Lag_1'] = df['Gross Sales'].shift(1)   # Last week's sales
+        df['Lag_4'] = df['Gross Sales'].shift(4)   # Sales from four weeks ago
+        df['Lag_12'] = df['Gross Sales'].shift(12) # Sales from 12 weeks ago (quarterly lag)
         
         # Check how many rows have NaN values after lag creation
         print(f"Before dropping NaNs: {df.shape[0]} rows")
         
-        # Drop rows with NaN due to lagging, but make sure enough data remains
+        # Drop rows with NaN values due to lagging
         df.dropna(inplace=True)
-        
         df.reset_index(drop=True, inplace=True)  # Reset the index after dropping rows
         
         # Check how many rows are left after dropping NaNs
         print(f"After dropping NaNs: {df.shape[0]} rows")
         
         return df
+
          
 
     def scale_features(self, df):
         """Scale numerical features to standardize the input for modeling."""
-        numerical_features = ['Year', 'Week', 'Quarter', 'Is Christmas', 'Is Easter', 
-                              'Is Seasonality Peak', 
-                              'Is Summer Peak', 'Is Winter Peak']
+        numerical_features = ['Year', 'Week', 'Quarter', 'Trend', 'Seasonality', 'Residual', 'Lag_1', 'Lag_4', 'Lag_12']
         df[numerical_features] = self.standard_scaler.fit_transform(df[numerical_features])
         
         # Scaling Gross Sales separately
@@ -208,6 +209,8 @@ class DataPreprocessor:
                                    'Lag_1', 'Lag_4', 'Lag_12', 'Gross Sales']].values
 
         return self.data, weekly_sales['Datetime']
+    
+    
     
 # Step 2: Pytorch LSTM Model in OOP
 
@@ -568,6 +571,7 @@ if __name__ == '__main__':
     # Initialize the data preprocessor
     preprocessor = DataPreprocessor(file_path)
     data, dates = preprocessor.preprocess()
+    print(self.data.isnull().sum())
     
     
     sequence_length = 12  # Number of time steps in each input sequence
@@ -610,4 +614,7 @@ if __name__ == '__main__':
     last_sequence = torch.tensor(last_sequence).unsqueeze(0).float()
 
 
+    
+    
+    
     
